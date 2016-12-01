@@ -28,8 +28,6 @@
 
 package org.opennms.netmgt.syslogd;
 
-import java.io.File;
-import java.net.ServerSocket;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Dictionary;
@@ -37,19 +35,14 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
-import kafka.server.KafkaConfig;
-import kafka.server.KafkaServer;
-
 import org.apache.camel.component.mock.MockEndpoint;
 import org.apache.camel.util.KeyValueHolder;
-import org.apache.commons.io.FileUtils;
-import org.apache.curator.test.TestingServer;
-import org.junit.After;
-import org.junit.BeforeClass;
+import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.opennms.core.test.OpenNMSJUnit4ClassRunner;
 import org.opennms.core.test.camel.CamelBlueprintTest;
+import org.opennms.core.test.kafka.JUnitKafkaServer;
 import org.opennms.core.utils.InetAddressUtils;
 import org.opennms.core.xml.JaxbUtils;
 import org.opennms.netmgt.dao.api.MonitoringLocationDao;
@@ -63,59 +56,12 @@ public class SyslogdHandlerKafkaIT extends CamelBlueprintTest {
 
 	private static final Logger LOG = LoggerFactory.getLogger(SyslogdHandlerKafkaIT.class);
 
-	private static KafkaConfig kafkaConfig;
-
-	private KafkaServer kafkaServer;
-	private TestingServer zkTestServer;
-
-	private int kafkaPort;
-
-	private int zookeeperPort;
-
-	private static int getAvailablePort(int min, int max) {
-		for (int i = min; i <= max; i++) {
-			try (ServerSocket socket = new ServerSocket(i)) {
-				return socket.getLocalPort();
-			} catch (Throwable e) {}
-		}
-		throw new IllegalStateException("Can't find an available network port");
-	}
-
-	@Override
-	public void doPreSetup() throws Exception {
-		super.doPreSetup();
-
-		// Delete any existing Kafka log directory
-		FileUtils.deleteDirectory(new File("target/kafka-log"));
-
-		zkTestServer = new TestingServer(zookeeperPort);
-		Properties properties = new Properties();
-		properties.put("broker.id", "5001");
-		properties.put("enable.zookeeper", "false");
-		properties.put("host.name", "localhost");
-		properties.put("log.dir", "target/kafka-log");
-		properties.put("port", String.valueOf(kafkaPort));
-		properties.put("zookeeper.connect",zkTestServer.getConnectString());
-		try {
-			kafkaConfig = new KafkaConfig(properties);
-			kafkaServer = new KafkaServer(kafkaConfig, null);
-			kafkaServer.startup();
-		}
-		catch(Exception e){
-			e.printStackTrace();
-		}
-	}
-
-	@BeforeClass
-	public static void startKafka() throws Exception {
-	}
+	@ClassRule
+	public static final JUnitKafkaServer KAFKA = new JUnitKafkaServer();
 
 	@Override
 	protected String setConfigAdminInitialConfiguration(Properties props) {
-		zookeeperPort = getAvailablePort(2181, 2281);
-		kafkaPort = getAvailablePort(9092, 9192);
-
-		props.put("kafkaAddress", String.valueOf("127.0.0.1:" + kafkaPort));
+		props.put("kafkaAddress", String.valueOf("127.0.0.1:" + KAFKA.getKafkaPort()));
 		return "org.opennms.netmgt.syslog.handler.kafka";
 	}
 
@@ -134,7 +80,7 @@ public class SyslogdHandlerKafkaIT extends CamelBlueprintTest {
 	@Test
 	public void testSyslogd() throws Exception {
 
-		final MockEndpoint broadcastSyslog = getMockEndpoint("mock:kafka:127.0.0.1:" + kafkaPort, false);
+		final MockEndpoint broadcastSyslog = getMockEndpoint("mock:kafka:127.0.0.1:" + KAFKA.getKafkaPort(), false);
 		broadcastSyslog.setExpectedMessageCount(1);
 
 		// Create a mock SyslogdConfig
@@ -171,10 +117,5 @@ public class SyslogdHandlerKafkaIT extends CamelBlueprintTest {
 		assertEquals(2000, result.getPort());
 		assertTrue(Arrays.equals(result.getBytes(), messageBytes));
 		assertEquals(systemId.toString(), result.getSystemId());
-	}
-
-	@After
-	public void shutDownKafka(){
-		kafkaServer.shutdown();
 	}
 }

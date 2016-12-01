@@ -28,13 +28,9 @@
 
 package org.opennms.netmgt.trapd;
 
-import java.net.ServerSocket;
 import java.util.Dictionary;
 import java.util.Map;
 import java.util.Properties;
-
-import kafka.server.KafkaConfig;
-import kafka.server.KafkaServer;
 
 import org.apache.camel.CamelContext;
 import org.apache.camel.Exchange;
@@ -45,13 +41,13 @@ import org.apache.camel.component.kafka.KafkaConstants;
 import org.apache.camel.impl.DefaultCamelContext;
 import org.apache.camel.impl.SimpleRegistry;
 import org.apache.camel.util.KeyValueHolder;
-import org.apache.curator.test.TestingServer;
-import org.junit.After;
+import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.MockitoAnnotations;
 import org.opennms.core.test.OpenNMSJUnit4ClassRunner;
 import org.opennms.core.test.camel.CamelBlueprintTest;
+import org.opennms.core.test.kafka.JUnitKafkaServer;
 import org.opennms.netmgt.config.TrapdConfig;
 import org.opennms.netmgt.config.api.EventConfDao;
 import org.opennms.netmgt.dao.api.InterfaceToNodeCache;
@@ -77,22 +73,8 @@ public class TrapdHandlerKafkaDefaultIT extends CamelBlueprintTest {
 
 	private static final Logger LOG = LoggerFactory.getLogger(TrapdHandlerKafkaDefaultIT.class);
 
-	private static KafkaConfig kafkaConfig;
-	private KafkaServer kafkaServer;
-	private TestingServer zkTestServer;
-
-	private int kafkaPort;
-
-	private int zookeeperPort;
-
-	private static int getAvailablePort(int min, int max) {
-		for (int i = min; i <= max; i++) {
-			try (ServerSocket socket = new ServerSocket(i)) {
-				return socket.getLocalPort();
-			} catch (Throwable e) {}
-		}
-		throw new IllegalStateException("Can't find an available network port");
-	}
+	@ClassRule
+	public static final JUnitKafkaServer KAFKA = new JUnitKafkaServer();
 
 	@Override
 	public void doPreSetup() throws Exception {
@@ -102,31 +84,12 @@ public class TrapdHandlerKafkaDefaultIT extends CamelBlueprintTest {
 			MockitoAnnotations.initMocks(this);
 			mockInitialized = true;
 		}
-
-		zkTestServer = new TestingServer(zookeeperPort);
-		Properties properties = new Properties();
-		properties.put("port", String.valueOf(kafkaPort));
-		properties.put("host.name", "localhost");
-		properties.put("broker.id", "5001");
-		properties.put("enable.zookeeper", "false");
-		properties.put("zookeeper.connect",zkTestServer.getConnectString());
-		try{
-			kafkaConfig = new KafkaConfig(properties);
-			kafkaServer = new KafkaServer(kafkaConfig, null);
-			kafkaServer.startup();
-		}
-		catch(Exception e){
-			e.printStackTrace();
-		}
 	}
 
 	@Override
 	protected String setConfigAdminInitialConfiguration(Properties props) {
-		zookeeperPort = getAvailablePort(2181, 2281);
-		kafkaPort = getAvailablePort(9092, 9192);
-
-		props.put("zookeeperport", String.valueOf(zookeeperPort));
-		props.put("kafkaport", String.valueOf(kafkaPort));
+		props.put("zookeeperport", String.valueOf(KAFKA.getZookeeperPort()));
+		props.put("kafkaport", String.valueOf(KAFKA.getKafkaPort()));
 		return "org.opennms.netmgt.trapd.handler.kafka.default";
 	}
 
@@ -240,10 +203,5 @@ public class TrapdHandlerKafkaDefaultIT extends CamelBlueprintTest {
 		syslogd.start();
 
 		// TODO: Send messages and assert that they are processed correctly
-	}
-
-	@After
-	public void shutDownKafka(){
-		kafkaServer.shutdown();
 	}
 }
