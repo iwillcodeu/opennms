@@ -171,6 +171,24 @@ public class EventdConfigManager implements EventdConfig {
     }
 
     /**
+     * Return whether we should discard events when the handler or
+     * listener queues are full (defaults to true). If false, the
+     * handlers or listeners are executed on the current thread to
+     * throttle incoming event processing.
+     *
+     * @return Whether we should discard events when the Eventd
+     *         queues are full
+     */
+    public boolean getDiscardWhenFull() {
+        getReadLock().lock();
+        try {
+            return m_config.hasDiscardWhenFull() ? m_config.getDiscardWhenFull() : Boolean.TRUE;
+        } finally {
+            getReadLock().unlock();
+        }
+    }
+
+    /**
      * Return string indicating if timeout is to be set on the socket.
      *
      * @return string indicating if timeout is to be set on the socket

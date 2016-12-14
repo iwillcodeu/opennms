@@ -30,7 +30,10 @@ package org.opennms.netmgt.syslogd;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.ThreadPoolExecutor;
 
+import org.opennms.core.concurrent.CallerRunsFirstPolicy;
 import org.opennms.core.concurrent.ExecutorFactory;
 import org.opennms.core.concurrent.ExecutorFactoryJavaImpl;
 import org.slf4j.Logger;
@@ -68,9 +71,31 @@ public class SyslogConnectionHandlerDefaultImpl implements SyslogConnectionHandl
 	 */
 	public static final int SENDER_QUEUE_SIZE = 25000;
 
+	/**
+	 * {@link RejectedExecutionHandler} that the thread pools will use here.
+	 * 
+	 * TODO: Make this configurable
+	 */
+	public static final RejectedExecutionHandler CALLER_RUNS_FIRST = new CallerRunsFirstPolicy();
+
 	private final ExecutorFactory m_executorFactory = new ExecutorFactoryJavaImpl();
-	private final ExecutorService m_syslogConnectionExecutor = m_executorFactory.newExecutor(PARSER_THREADS, PARSER_QUEUE_SIZE, "OpenNMS.Syslogd", "syslogConnections");
-	private final ExecutorService m_syslogProcessorExecutor = m_executorFactory.newExecutor(SENDER_THREADS, SENDER_QUEUE_SIZE, "OpenNMS.Syslogd", "syslogProcessors");
+	private final ExecutorService m_syslogConnectionExecutor = m_executorFactory.newExecutor(PARSER_THREADS, PARSER_QUEUE_SIZE, "OpenNMS.Syslogd", "syslogConnections", new RejectedExecutionHandler() {
+		@Override
+		public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+			// Use the CALLER_RUNS_FIRST to run the handler task
+			LOG.warn("Syslog connection queue is full, running task on current thread");
+			CALLER_RUNS_FIRST.rejectedExecution(r, executor);
+		}
+	});
+
+	private final ExecutorService m_syslogProcessorExecutor = m_executorFactory.newExecutor(SENDER_THREADS, SENDER_QUEUE_SIZE, "OpenNMS.Syslogd", "syslogProcessors", new RejectedExecutionHandler() {
+		@Override
+		public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+			// Use the CALLER_RUNS_FIRST to run the handler task
+			LOG.warn("Syslog processor queue is full, running task on current thread");
+			CALLER_RUNS_FIRST.rejectedExecution(r, executor);
+		}
+	});
 
 	@Override
 	public void handleSyslogConnection(final SyslogConnection message) {

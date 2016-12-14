@@ -30,7 +30,10 @@ package org.opennms.netmgt.trapd;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.ThreadPoolExecutor;
 
+import org.opennms.core.concurrent.CallerRunsFirstPolicy;
 import org.opennms.core.concurrent.ExecutorFactory;
 import org.opennms.core.concurrent.ExecutorFactoryJavaImpl;
 import org.opennms.netmgt.dao.api.InterfaceToNodeCache;
@@ -55,8 +58,22 @@ public class TrapNotificationHandlerDefaultImpl implements TrapNotificationHandl
 	 */
 	public static final int QUEUE_SIZE = 25000;
 
+	/**
+	 * {@link RejectedExecutionHandler} that the thread pools will use here.
+	 * 
+	 * TODO: Make this configurable
+	 */
+	public static final RejectedExecutionHandler CALLER_RUNS_FIRST = new CallerRunsFirstPolicy();
+
 	private final ExecutorFactory m_executorFactory = new ExecutorFactoryJavaImpl();
-	private final ExecutorService m_processorExecutor = m_executorFactory.newExecutor(TRAP_PROCESSOR_THREADS, QUEUE_SIZE, "OpenNMS.Trapd", "trapProcessors");
+	private final ExecutorService m_processorExecutor = m_executorFactory.newExecutor(TRAP_PROCESSOR_THREADS, QUEUE_SIZE, "OpenNMS.Trapd", "trapProcessors", new RejectedExecutionHandler() {
+		@Override
+		public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+			// Use the CALLER_RUNS_FIRST to run the handler task
+			LOG.warn("Trap processor queue is full, running task on current thread");
+			CALLER_RUNS_FIRST.rejectedExecution(r, executor);
+		}
+	});
 
 	private TrapQueueProcessorFactory m_processorFactory;
 

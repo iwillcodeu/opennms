@@ -44,6 +44,7 @@ import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import org.opennms.core.concurrent.CallerRunsFirstPolicy;
 import org.opennms.core.concurrent.LogPreservingThreadFactory;
 import org.opennms.core.logging.Logging;
 import org.opennms.netmgt.events.api.EventHandler;
@@ -98,6 +99,8 @@ public class EventIpcManagerDefaultImpl implements EventIpcManager, EventIpcBroa
         }
     }
 
+    private static final RejectedExecutionHandler CALLER_RUNS_FIRST = new CallerRunsFirstPolicy();
+
     /**
      * Hash table of list of event listeners keyed by event UEI
      */
@@ -121,8 +124,10 @@ public class EventIpcManagerDefaultImpl implements EventIpcManager, EventIpcBroa
     private EventHandler m_eventHandler;
 
     private Integer m_handlerPoolSize;
-    
+
     private Integer m_handlerQueueLength;
+
+    private boolean m_handlerDiscardWhenFull;
 
     private final MetricRegistry m_registry;
 
@@ -146,9 +151,9 @@ public class EventIpcManagerDefaultImpl implements EventIpcManager, EventIpcBroa
         /**
          * Constructor
          */
-        EventListenerExecutor(EventListener listener, Integer handlerQueueLength) {
+        EventListenerExecutor(EventListener listener, Integer handlerQueueLength, boolean handlerDiscardWhenFull) {
             m_listener = listener;
-            // You could also do Executors.newSingleThreadExecutor() here
+
             m_delegateThread = new ThreadPoolExecutor(
                     1,
                     1,
@@ -163,7 +168,13 @@ public class EventIpcManagerDefaultImpl implements EventIpcManager, EventIpcBroa
                     new RejectedExecutionHandler() {
                         @Override
                         public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
-                            LOG.warn("Listener {}'s event queue is full, discarding event", m_listener.getName());
+                            if (handlerDiscardWhenFull) {
+                                LOG.warn("Listener {}'s event queue is full, discarding event", m_listener.getName());
+                            } else {
+                                // Use the CALLER_RUNS_FIRST to run the handler task
+                                LOG.warn("Listener {}'s event queue is full, running task on current thread", m_listener.getName());
+                                CALLER_RUNS_FIRST.rejectedExecution(r, executor);
+                            }
                         }
                     }
             );
@@ -174,12 +185,19 @@ public class EventIpcManagerDefaultImpl implements EventIpcManager, EventIpcBroa
                 @Override
                 public void run() {
                     try {
-                        LOG.debug("run: calling onEvent on {} for event {} dbid {} with time {}", m_listener.getName(), event.getUei(), event.getDbid(), event.getTime());
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("run: calling onEvent on {} for event {} dbid {} with time {}", m_listener.getName(), event.getUei(), event.getDbid(), event.getTime());
+                        }
 
                         // Make sure we restore our log4j logging prefix after onEvent is called
                         Map<String,String> mdc = Logging.getCopyOfContextMap();
                         try {
-                            m_listener.onEvent(event);
+                            // Synchronize on the listener so that only one onEvent() method
+                            // can run simultaneously (in case the RejectedExecutionHandler starts
+                            // executing on the caller threads when the executor queue is full)
+                            synchronized(m_listener) {
+                                m_listener.onEvent(event);
+                            }
                         } finally {
                             Logging.setContextMap(mdc);
                         }
@@ -475,7 +493,7 @@ public class EventIpcManagerDefaultImpl implements EventIpcManager, EventIpcBroa
             return;
         }
         
-        EventListenerExecutor listenerThread = new EventListenerExecutor(listener, m_handlerQueueLength);
+        EventListenerExecutor listenerThread = new EventListenerExecutor(listener, m_handlerQueueLength, m_handlerDiscardWhenFull);
         m_listenerThreads.put(listener.getName(), listenerThread);
     }
 
@@ -551,7 +569,19 @@ public class EventIpcManagerDefaultImpl implements EventIpcManager, EventIpcBroa
                     0L,
                     TimeUnit.MILLISECONDS,
                     workQueue,
-                    new LogPreservingThreadFactory(EventIpcManagerDefaultImpl.class.getSimpleName(), m_handlerPoolSize)
+                    new LogPreservingThreadFactory(EventIpcManagerDefaultImpl.class.getSimpleName(), m_handlerPoolSize),
+                    new RejectedExecutionHandler() {
+                        @Override
+                        public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+                            if (m_handlerDiscardWhenFull) {
+                                LOG.warn("Event handler queue is full, discarding event");
+                            } else {
+                                // Use the CALLER_RUNS_FIRST to run the handler task
+                                LOG.warn("Event handler queue is full, running task on current thread");
+                                CALLER_RUNS_FIRST.rejectedExecution(r, executor);
+                            }
+                        }
+                    }
                 );
             }
             
@@ -613,6 +643,14 @@ public class EventIpcManagerDefaultImpl implements EventIpcManager, EventIpcBroa
     public void setHandlerQueueLength(int size) {
         Assert.state(m_eventHandlerPool == null, "handlerQueueLength property cannot be set after afterPropertiesSet() is called");
         m_handlerQueueLength = size;
+    }
+
+    public boolean getHandlerDiscardWhenFull() {
+        return m_handlerDiscardWhenFull;
+    }
+
+    public void setHandlerDiscardWhenFull(boolean handlerDiscardWhenFull) {
+        m_handlerDiscardWhenFull = handlerDiscardWhenFull;
     }
 
     @Override
