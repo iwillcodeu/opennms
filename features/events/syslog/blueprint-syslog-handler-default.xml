@@ -23,6 +23,10 @@
 			<cm:property name="queueName">
 				<bean factory-ref="queueNameFactory" factory-method="getName"/>
 			</cm:property>
+			<cm:property name="concurrentConsumers" value="4" />
+			<cm:property name="queueSize" value="25000" />
+			<cm:property name="queueTimeout" value="0" /> <!-- Disable timeout by default -->
+			<cm:property name="blockWhenFull" value="true" />
 		</cm:default-properties>
 	</cm:property-placeholder>
 
@@ -58,24 +62,24 @@
 		<propertyPlaceholder id="properties" location="blueprint:syslogHandlerDefaultProperties" />
 
 		<route id="receiveSyslogConnection">
-			<from uri="queuingservice:{{queueName}}?concurrentConsumers=8"/>
+			<from uri="queuingservice:{{queueName}}?concurrentConsumers={{concurrentConsumers}}"/>
 			<!-- No performance improvement with asyncConsumer -->
-			<!-- <from uri="activemq:{{queueName}}?asyncConsumer=true&amp;concurrentConsumers=8"/> -->
-			<to uri="seda:unmarshalMessage?size=25000"/>
+			<!-- <from uri="activemq:{{queueName}}?asyncConsumer=true&amp;concurrentConsumers={{concurrentConsumers}}"/> -->
+			<to uri="seda:unmarshalMessage?size={{queueSize}}&amp;timeout={{queueTimeout}}&amp;blockWhenFull={{blockWhenFull}}"/>
 		</route>
 
 		<route id="unmarshalSyslogConnection">
-			<from uri="seda:unmarshalMessage?concurrentConsumers=8&amp;size=25000&amp;blockWhenFull=true"/>
+			<from uri="seda:unmarshalMessage?concurrentConsumers={{concurrentConsumers}}&amp;size={{queueSize}}"/>
 			<!-- TODO: Change these to <process> tags once Syslogd is loaded from inside Karaf -->
 			<bean ref="unmarshaller"/>
 			<bean ref="mapper"/>
 			<!-- Update the SyslogdConfig on the message to the local config value -->
 			<bean ref="syslogdConfigProcessor"/>
-			<to uri="seda:syslogHandler?size=25000"/>
+			<to uri="seda:syslogHandler?size={{queueSize}}&amp;timeout={{queueTimeout}}&amp;blockWhenFull={{blockWhenFull}}"/>
 		</route>
 
 		<route id="handleSyslogConnection">
-			<from uri="seda:syslogHandler?concurrentConsumers=8&amp;size=25000&amp;blockWhenFull=true"/>
+			<from uri="seda:syslogHandler?concurrentConsumers={{concurrentConsumers}}&amp;size={{queueSize}}"/>
 			<!-- 
 				Pass the message to the default handler which will convert it into
 				an event and broadcast the event.

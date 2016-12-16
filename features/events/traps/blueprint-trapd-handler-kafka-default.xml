@@ -21,6 +21,10 @@
 			<cm:property name="zookeeperport" value="2181"/>
 			<cm:property name="groupId" value="trapdconsumer"/>
 			<cm:property name="consumerstreams" value="1"/>	
+			<cm:property name="concurrentConsumers" value="4" />
+			<cm:property name="queueSize" value="25000" />
+			<cm:property name="queueTimeout" value="0" /> <!-- Disable timeout by default -->
+			<cm:property name="blockWhenFull" value="true" />
 		</cm:default-properties>
 	</cm:property-placeholder>
 
@@ -68,11 +72,11 @@
 			<!-- TODO: Change these to <process> tags once Trapd is loaded from inside Karaf -->
 			<bean ref="unmarshaller"/>
 			<bean ref="mapper"/>
-			<to uri="seda:trapHandler?size=25000"/>
+			<to uri="seda:trapHandler?size={{queueSize}}&amp;timeout={{queueTimeout}}&amp;blockWhenFull={{blockWhenFull}}"/>
 		</route>
 
 		<route id="trapHandler">
-			<from uri="seda:trapHandler?concurrentConsumers=8&amp;size=25000&amp;blockWhenFull=true" />
+			<from uri="seda:trapHandler?concurrentConsumers={{concurrentConsumers}}&amp;size={{queueSize}}" />
 			<!--
 				Pass the message to the default handler which will convert it into 
 				an event and broadcast the event.

@@ -24,11 +24,15 @@
 				<bean factory-ref="queueNameFactory" factory-method="getName"/>
 			</cm:property>
 			<cm:property name="includeRawMessage" value="true" />
+			<cm:property name="concurrentConsumers" value="4" />
+			<cm:property name="queueSize" value="25000" />
+			<cm:property name="queueTimeout" value="0" /> <!-- Disable timeout by default -->
+			<cm:property name="blockWhenFull" value="true" />
 		</cm:default-properties>
 	</cm:property-placeholder>
 
 	<bean id="syslogConnectionHandlerCamel" class="org.opennms.netmgt.syslogd.SyslogConnectionHandlerCamelImpl">
-		<argument value="seda:handleMessage?size=25000"/>
+		<argument value="seda:handleMessage?size=${queueSize}&amp;timeout=${queueTimeout}&amp;blockWhenFull=${blockWhenFull}"/>
 	</bean>
 
 	<service interface="org.opennms.netmgt.syslogd.SyslogConnectionHandler" ref="syslogConnectionHandlerCamel"/>
@@ -48,7 +52,7 @@
 		<propertyPlaceholder id="properties" location="blueprint:syslogHandlerMinionProperties" />
 
 		<route id="syslogMarshal">
-			<from uri="seda:handleMessage?concurrentConsumers=8&amp;size=25000&amp;blockWhenFull=true" />
+			<from uri="seda:handleMessage?concurrentConsumers={{concurrentConsumers}}&amp;size={{queueSize}}" />
 
 			<setHeader headerName="includeRawMessage">
 				<simple resultType="java.lang.Boolean">properties:includeRawMessage</simple>
@@ -58,12 +62,12 @@
 			<process ref="mapper"/>
 			<process ref="marshaller"/>
 
-			<to uri="seda:sendMessage?size=25000"/>
+			<to uri="seda:sendMessage?size={{queueSize}}&amp;timeout={{queueTimeout}}&amp;blockWhenFull={{blockWhenFull}}"/>
 		</route>
 
 		<route id="syslogSendJms">
 			<!-- Concurrent consumers gives a performance boost here because we have pooled connections to the JMS broker -->
-			<from uri="seda:sendMessage?concurrentConsumers=8&amp;size=25000&amp;blockWhenFull=true"/>
+			<from uri="seda:sendMessage?concurrentConsumers={{concurrentConsumers}}&amp;size={{queueSize}}"/>
 			<!-- Broadcast the message over ActiveMQ -->
 			<!--
 				Turn off persistent messages to avoid the latency penalty: 

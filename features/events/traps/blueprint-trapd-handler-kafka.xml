@@ -18,13 +18,17 @@
 			<cm:property name="kafkaAddress" value="127.0.0.1:9092" />
 			<cm:property name="kafkatopic" value="trapd" />
 			<cm:property name="includeRawMessage" value="false" />
+			<cm:property name="concurrentConsumers" value="4" />
+			<cm:property name="queueSize" value="25000" />
+			<cm:property name="queueTimeout" value="0" /> <!-- Disable timeout by default -->
+			<cm:property name="blockWhenFull" value="true" />
 		</cm:default-properties>
 	</cm:property-placeholder>
 
 	<bean id="partitionKeyGenerator" class="org.opennms.core.camel.RandomPartitionKeyGenerator"/>
 
 	<bean id="trapdNotificationHandlerCamel" class="org.opennms.netmgt.trapd.TrapNotificationHandlerCamelImpl">
-		<argument value="seda:handleMessage"/>
+		<argument value="seda:handleMessage?size=$[queueSize]&amp;timeout=$[queueTimeout]&amp;blockWhenFull=$[blockWhenFull]"/>
 	</bean>
 
 	<service interface="org.opennms.netmgt.trapd.TrapNotificationHandler" ref="trapdNotificationHandlerCamel"/>
@@ -45,7 +49,7 @@
 		<propertyPlaceholder id="properties" location="blueprint:trapdHandlerKafkaProperties" />
 
 		<route id="trapMarshal">
-			<from uri="seda:handleMessage?concurrentConsumers=4"/>
+			<from uri="seda:handleMessage?concurrentConsumers={{concurrentConsumers}}&amp;size={{queueSize}}"/>
 
 			<setHeader headerName="includeRawMessage">
 				<simple resultType="java.lang.Boolean">properties:includeRawMessage</simple>
@@ -54,11 +58,11 @@
 			<!-- Marshal the message to XML -->
 			<process ref="mapper"/>
 			<process ref="marshaller"/>
-			<to uri="seda:sendMessage"/>
+			<to uri="seda:sendMessage?size={{queueSize}}&amp;timeout={{queueTimeout}}&amp;blockWhenFull={{blockWhenFull}}"/>
 		</route>
 
 		<route id="trapSendKafka">
-			<from uri="seda:sendMessage?concurrentConsumers=4"/>
+			<from uri="seda:sendMessage?concurrentConsumers={{concurrentConsumers}}&amp;size={{queueSize}}"/>
 
 			<!-- HZN-862: Use ByteArrayPartitioner instead of this key generator -->
 			<setHeader headerName="kafka.PARTITION_KEY">
